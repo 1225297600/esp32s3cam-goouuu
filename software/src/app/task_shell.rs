@@ -272,7 +272,9 @@ pub async fn task_shell(stack: Stack<'static>) -> ! {
                                         ));
                                     }
                                     Shell::Sdls => {
-                                        let files = crate::app::task_sd::list_files();
+                                        // shell 是同步上下文，只能读缓存；顺便触发一次后台重扫
+                                        crate::app::task_sd::request_rescan();
+                                        let files = crate::app::task_sd::cached_files();
                                         if files.is_empty() {
                                             push_out(b"(no files or not mounted)\r\n");
                                         }
@@ -281,13 +283,16 @@ pub async fn task_shell(stack: Stack<'static>) -> ! {
                                         }
                                     }
                                     Shell::Sdget { name } => {
-                                        match crate::app::task_sd::read_file(name) {
-                                            Some(data) => pout(format_args!(
-                                                "{}: {} bytes\r\n",
-                                                name,
-                                                data.len()
+                                        // 同步上下文无法读卡内容，按缓存目录回报大小（下载走 web）
+                                        match crate::app::task_sd::cached_files()
+                                            .into_iter()
+                                            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                                        {
+                                            Some((n, size)) => pout(format_args!(
+                                                "{}: {} bytes (download via /api/sd/download/{})\r\n",
+                                                n, size, n
                                             )),
-                                            None => push_out(b"read failed or not found\r\n"),
+                                            None => push_out(b"not found (try 'sdls' to rescan)\r\n"),
                                         }
                                     }
                                     Shell::Exit => {

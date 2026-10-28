@@ -249,7 +249,7 @@ pub async fn api_capture() -> impl picoserve::response::IntoResponse {
 
 /// GET /api/sd/list —— 根目录文件列表 JSON
 pub async fn api_sd_list() -> impl picoserve::response::IntoResponse {
-    let files = crate::app::task_sd::list_files();
+    let files = crate::app::task_sd::list_files().await;
     let mut s: String<2048> = String::new();
     let _ = write!(&mut s, "{{\"count\":{},\"files\":[", files.len());
     for (i, (name, size)) in files.iter().enumerate() {
@@ -266,7 +266,7 @@ pub async fn api_sd_list() -> impl picoserve::response::IntoResponse {
 pub async fn api_sd_download(
     name: heapless::String<64>,
 ) -> impl picoserve::response::IntoResponse {
-    match crate::app::task_sd::read_file(name.as_str()) {
+    match crate::app::task_sd::read_file(name.as_str()).await {
         Some(data) if !data.is_empty() => Response::new(StatusCode::OK, data)
             .with_header("Content-Type", "application/octet-stream")
             .with_header("Content-Disposition", "attachment"),

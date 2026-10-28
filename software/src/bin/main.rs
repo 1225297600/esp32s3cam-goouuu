@@ -104,12 +104,14 @@ async fn main(spawner: Spawner) -> ! {
     let ws2812_led = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
 
     // ---- SD 卡（native SDMMC 1-bit：CMD=IO38 CLK=IO39 DATA0=IO40）----
-    task_sd::try_mount(
+    // 由 task_sd 独占 SDHOST：400kHz 枚举 -> 20MHz 运行 -> 挂载 FAT -> 后台待命
+    spawner.spawn(task_sd::task_sd(
         peripherals.SDHOST,
         peripherals.GPIO39,
         peripherals.GPIO38,
         peripherals.GPIO40,
-    );
+        peripherals.TIMG1,
+    ).unwrap());
 
     // ---- 启动任务 ----
     spawner.spawn(task_net(spawner, peripherals.WIFI).unwrap());

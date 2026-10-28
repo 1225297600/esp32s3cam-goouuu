@@ -2029,12 +2029,13 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdio"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f7328e9dbad1337ef2d94a8404428a42d77a9916cda7c2e51287a1998da9afb"
+checksum = "7e483c3164ca053d1349be3183b0cf2bd966eb6c1a4623f6d8875cf507649971"
 dependencies = [
  "aligned",
  "block-device-driver",
+ "defmt 1.1.1",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
 ]
@@ -2592,6 +2593,8 @@ dependencies = [
 name = "wx_esp32s3"
 version = "0.1.0"
 dependencies = [
+ "aligned",
+ "block-device-driver",
  "bt-hci",
  "critical-section",
  "defmt 1.1.1",
@@ -2611,6 +2614,7 @@ dependencies = [
  "esp-rtos",
  "heapless 0.8.0",
  "picoserve",
+ "sdio",
  "smoltcp 0.14.0",
  "static_cell",
  "trouble-host",

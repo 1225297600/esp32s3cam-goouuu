@@ -68,6 +68,11 @@ trouble-host = { version = "0.7.0", features = ["gatt"] }
 critical-section = "1.2.0"
 static_cell      = "2.1.1"
 
+# SDMMC 卡（esp-hal SDHOST 异步 Slot 实现了 sdio 的 MmcBus，已上机验证）
+sdio = { version = "0.5.3", features = ["defmt"] }
+block-device-driver = "0.2"
+aligned = "0.4"
+
 [profile.dev]
 opt-level = "s"
 
