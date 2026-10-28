@@ -10,6 +10,7 @@
 use core::fmt::Write as _;
 
 use heapless::String;
+use picoserve::response::chunked::{ChunkWriter, ChunkedResponse, Chunks};
 use picoserve::response::{Response, StatusCode};
 
 use crate::app::task_camera::{self, MAX_FRAME_LEN};
@@ -54,6 +55,7 @@ code{color:#8f8}
       </select>
     </label>
     <button onclick="refreshFrame()">拍一张</button>
+    <button id="livebtn" onclick="toggleLive()">▶ 直播</button>
     <span id="caminfo">--</span>
   </p>
   <p>
@@ -137,7 +139,23 @@ async function pollStatus() {
   } catch (e) {}
 }
 let timer = null;
+let live = false;
+function toggleLive() {
+  live = !live;
+  const img = document.getElementById('frame');
+  const btn = document.getElementById('livebtn');
+  if (live) {
+    if (timer) { clearInterval(timer); timer = null; }
+    img.src = '/stream?t=' + Date.now();   // multipart/x-mixed-replace 连续流
+    btn.textContent = '■ 停止直播';
+  } else {
+    img.src = '';
+    btn.textContent = '▶ 直播';
+    applyInterval();
+  }
+}
 function applyInterval() {
+  if (live) return;
   if (timer) clearInterval(timer);
   const ms = parseInt(document.getElementById('interval').value);
   if (ms > 0) { refreshFrame(); timer = setInterval(refreshFrame, ms); }
@@ -183,9 +201,14 @@ pub async fn api_status() -> impl picoserve::response::IntoResponse {
         let _ = write!(&mut s, "\"ip\":null,\"prefix_len\":null,\"gateway\":null");
     }
 
+    let sd = crate::app::task_sd::info();
     let _ = write!(
         &mut s,
-        ",\"sd\":{{\"bus\":\"1-bit SDMMC\",\"cmd\":38,\"clk\":39,\"data\":40,\"mounted\":false}}"
+        ",\"sd\":{{\"bus\":\"1-bit SDMMC\",\"cmd\":38,\"clk\":39,\"data\":40,\"present\":{},\"mounted\":{},\"fat\":{},\"total_mb\":{}}}",
+        sd.present,
+        sd.mounted,
+        sd.fat_type,
+        sd.total_mb
     );
 
     task_camera::CAMERA_STATUS.lock(|st| {
@@ -211,7 +234,6 @@ pub async fn api_status() -> impl picoserve::response::IntoResponse {
 /// GET /api/capture —— 最新一帧 JPEG；尚无帧时返回 409
 pub async fn api_capture() -> impl picoserve::response::IntoResponse {
     let (_seq, frame) = task_camera::latest_frame();
-
     let (status, body, ctype) = match frame {
         Some(data) if !data.is_empty() => (StatusCode::OK, data, "image/jpeg"),
         _ => (
@@ -220,10 +242,41 @@ pub async fn api_capture() -> impl picoserve::response::IntoResponse {
             "application/json",
         ),
     };
-
     Response::new(status, body)
         .with_header("Content-Type", ctype)
         .with_header("Cache-Control", "no-store")
+}
+
+/// GET /api/sd/list —— 根目录文件列表 JSON
+pub async fn api_sd_list() -> impl picoserve::response::IntoResponse {
+    let files = crate::app::task_sd::list_files();
+    let mut s: String<2048> = String::new();
+    let _ = write!(&mut s, "{{\"count\":{},\"files\":[", files.len());
+    for (i, (name, size)) in files.iter().enumerate() {
+        if i > 0 {
+            let _ = s.push(',');
+        }
+        let _ = write!(&mut s, "{{\"name\":\"{}\",\"size\":{}}}", name, size);
+    }
+    let _ = s.push_str("]}");
+    Response::new(StatusCode::OK, s).with_header("Content-Type", "application/json")
+}
+
+/// GET /api/sd/download/:name —— 下载 SD 卡上的文件
+pub async fn api_sd_download(
+    name: heapless::String<64>,
+) -> impl picoserve::response::IntoResponse {
+    match crate::app::task_sd::read_file(name.as_str()) {
+        Some(data) if !data.is_empty() => Response::new(StatusCode::OK, data)
+            .with_header("Content-Type", "application/octet-stream")
+            .with_header("Content-Disposition", "attachment"),
+        _ => Response::new(
+            StatusCode::NOT_FOUND,
+            alloc::vec::Vec::from(r#"{"status":"file not found or sd unavailable"}"#),
+        )
+        .with_header("Content-Type", "application/json")
+        .with_header("Content-Disposition", "inline"),
+    }
 }
 
 /// GET /api/camera/params —— 读取当前摄像头参数
@@ -276,3 +329,45 @@ pub async fn api_ws2812((r, g, b): (u8, u8, u8)) -> impl picoserve::response::In
 const _: () = {
     let _ = MAX_FRAME_LEN;
 };
+
+// ============================================================
+// MJPEG 推流 (multipart/x-mixed-replace, chunked)
+// ============================================================
+
+/// GET /stream —— 持续推送最新 JPEG 帧（浏览器 <img> 可直接显示）
+pub async fn stream() -> impl picoserve::response::IntoResponse {
+    ChunkedResponse::new(MjpegStream)
+}
+
+struct MjpegStream;
+
+impl Chunks for MjpegStream {
+    fn content_type(&self) -> &'static str {
+        "multipart/x-mixed-replace; boundary=frame"
+    }
+
+    async fn write_chunks<W: picoserve::io::Write>(
+        self,
+        mut cw: ChunkWriter<W>,
+    ) -> Result<picoserve::response::chunked::ChunksWritten, W::Error> {
+        use embassy_time::{Duration, Timer};
+        let mut last_seq = 0u32;
+        loop {
+            let seq = task_camera::frame_seq();
+            if seq != last_seq {
+                last_seq = seq;
+                let (_s, frame) = task_camera::latest_frame();
+                if let Some(jpeg) = frame {
+                    // 一个 multipart part = 头 + JPEG 体
+                    cw.write_chunk(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
+                        .await?;
+                    cw.write_chunk(&jpeg).await?;
+                    cw.write_chunk(b"\r\n").await?;
+                }
+            }
+            // 约 20fps 上限，且让出执行器给其他任务
+            Timer::after(Duration::from_millis(50)).await;
+        }
+        // 不主动 finalize：直到客户端断开（write_chunk 返回 Err）
+    }
+}

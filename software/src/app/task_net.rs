@@ -10,6 +10,7 @@ use esp_radio::wifi::{
     AuthenticationMethodConfig, Config, ControllerConfig, Interface, WifiController,
 };
 use static_cell::StaticCell;
+use crate::app::task_shell::task_shell;
 use crate::app::task_web::{task_web, WEB_TASK_POOL_SIZE};
 
 const WIFI_NAME: &str = "rayrobot";
@@ -102,6 +103,10 @@ pub async fn task_net(
         spawner.spawn(task_web(task_id, stack).unwrap());
     }
     info!("[net] web task spawned with stack");
+
+    // ---- TCP shell (telnet, 端口 23) ----
+    spawner.spawn(task_shell(stack).unwrap());
+    info!("[net] shell task spawned on tcp/23");
 
     // wifi_controller 必须保活，否则 Wi-Fi 连接会断开
     let _keep_alive = wifi_controller;

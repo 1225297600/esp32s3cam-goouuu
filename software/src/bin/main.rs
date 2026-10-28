@@ -22,6 +22,7 @@ use esp_println as _;
 
 use wx_esp32s3::app::task_camera::task_camera;
 use wx_esp32s3::app::task_net::task_net;
+use wx_esp32s3::app::task_sd;
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -101,6 +102,14 @@ async fn main(spawner: Spawner) -> ! {
     // ---- 板载 WS2812（GPIO48） ----
     // 注意：GPIO43/44 是 U0TXD/U0RXD（CH343 串口 + defmt 日志），不可复用为 LED。
     let ws2812_led = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
+
+    // ---- SD 卡（native SDMMC 1-bit：CMD=IO38 CLK=IO39 DATA0=IO40）----
+    task_sd::try_mount(
+        peripherals.SDHOST,
+        peripherals.GPIO39,
+        peripherals.GPIO38,
+        peripherals.GPIO40,
+    );
 
     // ---- 启动任务 ----
     spawner.spawn(task_net(spawner, peripherals.WIFI).unwrap());

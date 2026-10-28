@@ -85,6 +85,11 @@ pub fn latest_frame() -> (u32, Option<Vec<u8>>) {
     })
 }
 
+/// 仅取当前帧序号（不拷贝数据，供推流轮询新帧）
+pub fn frame_seq() -> u32 {
+    FRAME.lock(|slot| slot.borrow().seq)
+}
+
 /// 发布设置请求
 pub fn request_params(quality: u8, mode: JpegMode) -> Result<(), ()> {
     CAMERA_SET_CHANNEL.try_send((quality, mode)).map_err(|_| ())
@@ -192,8 +197,14 @@ pub async fn task_camera(
     ws_pin: Output<'static>,
     spawner: Spawner,
 ) -> ! {
-    // ---- 板载 LED 任务 ----
-    let _ = spawner.spawn(task_ws2812(rmt_peri, ws_pin).unwrap());
+    // ---- 板载 LED 任务（spawn 失败必须可见，否则灯不亮无从排查）----
+    match task_ws2812(rmt_peri, ws_pin) {
+        Ok(fut) => {
+            spawner.spawn(fut);
+            info!("[cam] ws2812 task spawned");
+        }
+        Err(_) => error!("[cam] ws2812 future exceeds pool cell size"),
+    }
 
     // ---- 传感器探测与初始化 ----
     let mut quality = ov2640::REG_QS_DEFAULT;

@@ -5,7 +5,8 @@ use embassy_time::{Duration, Timer};
 use picoserve::routing::{get, post, parse_path_segment};
 
 use crate::app::routes::{
-    api_camera_params_get, api_camera_params_set, api_capture, api_status, api_ws2812, index,
+    api_camera_params_get, api_camera_params_set, api_capture, api_sd_download, api_sd_list,
+    api_status, api_ws2812, index, stream,
 };
 
 pub const WEB_TASK_POOL_SIZE: usize = 2;
@@ -16,8 +17,14 @@ pub async fn task_web(task_id: usize, stack: Stack<'static>) -> ! {
 
     let app = picoserve::Router::new()
         .route("/", get(index))
+        .route("/stream", get(stream))
         .route("/api/status", get(api_status))
         .route("/api/capture", get(api_capture))
+        .route("/api/sd/list", get(api_sd_list))
+        .route(
+            ("/api/sd/download", parse_path_segment::<heapless::String<64>>()),
+            get(api_sd_download),
+        )
         .route("/api/camera/params", get(api_camera_params_get))
         .route(
             (
